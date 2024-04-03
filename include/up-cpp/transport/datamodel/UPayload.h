@@ -58,42 +58,34 @@ namespace uprotocol::utransport {
 
         public:
             // Constructor
-            UPayload(const uint8_t* ptr, 
-                     const size_t size, 
-                     const UPayloadType &type) : dataSize_(size), type_(type) {
+            UPayload(const std::shared_ptr<const std::vector<uint8_t>> dataPtr, 
+                     const UPayloadType type, const UPayloadFormat format) : type_(type), payloadFormat_(format) {
 
                 if (type == UPayloadType::REFERENCE) {
-                    dataPtr_ = std::shared_ptr<const uint8_t[]>(ptr, [](const uint8_t*){});
+                    dataPtr_ = dataPtr;
                 } else {
-                    dataPtr_ = std::shared_ptr<const uint8_t[]>(new uint8_t[dataSize_], [](const uint8_t* p){ delete[] p; });
-                    if (nullptr != ptr) {
-                        std::memcpy(const_cast<uint8_t*>(dataPtr_.get()), ptr, dataSize_);
-                    }
+                    dataPtr_ = std::make_shared<const std::vector<uint8_t>>(*dataPtr);
                 }
             }
 
             // Copy constructor
-            UPayload(const UPayload& other) 
-                : dataSize_(other.dataSize_), type_(other.type_) {
+            UPayload(const UPayload& other) : type_(other.type_), payloadFormat_(other.payloadFormat_) {
                 if (type_ == UPayloadType::REFERENCE) {
                     dataPtr_ = other.dataPtr_;
                 } else {
-                    dataPtr_ = std::shared_ptr<const uint8_t[]>(new uint8_t[dataSize_], [](const uint8_t* p){ delete[] p; });
-                    std::memcpy(const_cast<uint8_t*>(dataPtr_.get()), other.dataPtr_.get(), dataSize_);
+                    dataPtr_ = std::make_shared<const std::vector<uint8_t>>(*(other.dataPtr_));
                 }
             }
 
             // Assignment operator
             UPayload& operator=(const UPayload& other) {
                 if (this != &other) {
-                    dataSize_ = other.dataSize_;
                     type_ = other.type_;
+                    payloadFormat_ = other.payloadFormat_;
                     if (type_ == UPayloadType::REFERENCE) {
                         dataPtr_ = other.dataPtr_;
                     } else {
-                        dataPtr_ = std::shared_ptr<const uint8_t[]>(new uint8_t[dataSize_], [](const uint8_t* p){ delete[] p; });
-                        std::memcpy(const_cast<uint8_t*>(dataPtr_.get()), other.dataPtr_.get(), dataSize_);
-
+                        dataPtr_ = std::make_shared<const std::vector<uint8_t>>(*(other.dataPtr_));
                     }
                 }
                 return *this;
@@ -101,55 +93,57 @@ namespace uprotocol::utransport {
 
             // Move constructor
             UPayload(UPayload&& other) noexcept 
-                : dataPtr_(std::move(other.dataPtr_)), dataSize_(other.dataSize_), type_(other.type_) {
-                other.dataSize_ = 0;
-            }
+                : dataPtr_(std::move(other.dataPtr_)), type_(other.type_), payloadFormat_(other.payloadFormat_) {
+                    other.type_ = UPayloadType::UNDEFINED;
+                    other.payloadFormat_ = UPayloadFormat::UNSPECIFIED;
+                }
 
             // Move assignment operator
             UPayload& operator=(UPayload&& other) noexcept {
                 if (this != &other) {
-                    dataSize_ = other.dataSize_;
                     type_ = other.type_;
+                    payloadFormat_ = other.payloadFormat_;
                     dataPtr_ = std::move(other.dataPtr_);
-                    other.dataSize_ = 0;
+                    other.type_ = UPayloadType::UNDEFINED;
+                    other.payloadFormat_ = UPayloadFormat::UNSPECIFIED;
                 }
                 return *this;
-            }
-
-            void setFormat(const UPayloadFormat &format) {
-                payloadFormat_ = format;
             }
 
             /**
             * @return data
             */
-            const uint8_t* data() const {
-                return dataPtr_.get();
+            std::shared_ptr<const std::vector<uint8_t>> data() const {
+                return dataPtr_;
             }
 
             /**
             * @return size
             */
             size_t size() const {
-                return dataSize_;
+                if (dataPtr_) {
+                    return dataPtr_->size();
+                }
+                return 0;
             }
 
            /**
             * @return format type
             */
             UPayloadFormat format() const {
-
                 return payloadFormat_;
             }
             
             bool isEmpty() const {
-                return dataSize_ == 0;
+                if (dataPtr_) {
+                    return dataPtr_->empty();
+                }
+                return true;
             }
 
         private:
-            std::shared_ptr<const uint8_t[]> dataPtr_;
-            size_t dataSize_;
-            UPayloadType type_;
+            std::shared_ptr<const std::vector<uint8_t>> dataPtr_;
+            UPayloadType type_ = UPayloadType::UNDEFINED;
             UPayloadFormat payloadFormat_ = UPayloadFormat::RAW;
     };
 }
