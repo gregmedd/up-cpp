@@ -191,7 +191,13 @@ public:
     /////////// Locking wrappers for existing std::map interfaces /////////////
     ///////////////////////////////////////////////////////////////////////////
     SafeMapT& operator=(const SafeMapT &other) {
-        std::scoped_lock lock(map_lock_, other.map_lock_);
+        // Other is const, so we want shared mode. Defer locking until the
+        // scoped_lock attempts to lock both mutexes (provides better deadlock
+        // resistance).
+        std::shared_lock other_lock(other.map_lock_, std::defer_lock_t());
+        // scoped_lock will see the shared_lock as if it were any other mutex,
+        // but it will translate lock requests into shared-mode lock requests.
+        std::scoped_lock lock(map_lock_, other_lock);
         MapT::operator=(other);
         return *this;
     }
