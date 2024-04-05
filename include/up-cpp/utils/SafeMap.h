@@ -1,26 +1,27 @@
-/*
- * Copyright (c) 2024 General Motors GTO LLC
- *
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- * SPDX-FileType: SOURCE
- * SPDX-FileCopyrightText: 2024 General Motors GTO LLC
- * SPDX-License-Identifier: Apache-2.0
- */
+///////////////////////////////////////////////////////////////////////////////
+// Copyright (c) 2024 General Motors GTO LLC
+//
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: 2024 General Motors GTO LLC
+// SPDX-License-Identifier: Apache-2.0
+///////////////////////////////////////////////////////////////////////////////
+ 
 #ifndef UP_CPP_SAFE_MAP_H
 #define UP_CPP_SAFE_MAP_H
 
@@ -32,19 +33,29 @@
 
 namespace uprotocol::utils {
 
+// Forward declaration for following using statements. See documentation below
 template<typename MapT>
 class BaseSafeMap;
 
+///////////////////////////////////////////////////////////////////////////////
+/// @name Common map type wrappers
+/// Templated type definitions of wrappers for common map types.
+/// @{
+
+/// @brief Thread-safe wrapper for std::map
 template<class Key, class T,
     class Compare = typename std::map<Key, T>::key_compare,
     class Allocator = typename std::map<Key, T, Compare>::allocator_type>
 using SafeMap = BaseSafeMap<std::map<Key, T, Compare, Allocator>>;
 
+/// @brief Thread-safe wrapper for std::unordered_map
 template<class Key, class T,
     class Hash = typename std::unordered_map<Key, T>::hasher,
     class KeyEqual = typename std::unordered_map<Key, T, Hash>::key_equal,
     class Allocator = typename std::unordered_map<Key, T, Hash, KeyEqual>::allocator_type>
 using SafeUnorderedMap = BaseSafeMap<std::unordered_map<Key, T, Hash, KeyEqual, Allocator>>;
+/// @}
+///////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
 /// @remarks Inherits publicly from MapT
@@ -52,6 +63,7 @@ template<typename MapT>
 struct CopyMoveCtorLocker;
 } // namespace detail
 
+///////////////////////////////////////////////////////////////////////////////
 /// @brief Wraps std::map in a std::shared_mutex for thread-safe access
 ///
 /// By using std::shared_mutex, we can avoid serialization of const access to
@@ -90,66 +102,80 @@ struct CopyMoveCtorLocker;
 ///          lock will be held while the callable is running.
 template<typename MapT>
 class BaseSafeMap : public detail::CopyMoveCtorLocker<MapT> {
+    /// @brief Shared mutex (aka read-write lock) used to protect concurrent
+    /// access to the map.
     mutable std::shared_mutex map_lock_{};
-    using SafeMapT = BaseSafeMap<MapT>;
+
+    /// @brief Shorthand for the copy/move locking base class this class has
+    ///        inherited from.
     using CMCLock = detail::CopyMoveCtorLocker<MapT>;
 
 public:
+    /// @brief Public redeclaration of the MapT template parameter so it can
+    ///        be used when needed (e.g. in writing lambdas for transact())
     using UnsafeMapT = MapT;
 
     ///////////////////////////////////////////////////////////////////////////
-    /////////////// New interfaces for safe bulk transactions /////////////////
-    ///////////////////////////////////////////////////////////////////////////
+    /// @name Bulk transactions
+    /// Collection of types and interfaces related to executing bulk operations
+    /// while the lock is held.
+    /// @{
+
+    /// @brief Type definition for a map-modifying callable returning an RT
     template<typename RT>
     using ModifyTxn = std::function<RT(MapT&)>;
 
+    /// @brief Executes a modifying transaction while an exclusive lock is held
+    ///
+    /// @param f Map-modifying callable to execute
+    /// @tparam RT Return value type for f
+    ///
+    /// @returns Value of RT returned from calling f
+    ///
+    /// @remarks Template parameter must be specified when passing anonymous
+    ///          lambdas of unclear return type (type deduction fails).
+    ///          For example:<br>
+    ///          `m.transact<bool>([](UnsafeMapT &m) { return m.empty(); });`
     template<typename RT>
     RT transact(ModifyTxn<RT> &&f) {
         std::unique_lock lock(map_lock_);
         return f(*this);
     }
 
+    /// @brief Overloading wrapper allowing non-returning transactions to be
+    ///        written without explicitly specifying RT = void.
     void transact(ModifyTxn<void> &&f) {
         transact<void>(std::move(f));
     }
 
+    /// @brief Type definition for a const callable returning an RT
     template<typename RT>
     using ConstTxn = std::function<RT(MapT const&)>;
 
+    /// @brief Executes a non-modifying transaction while a shared lock is held
+    ///
+    /// @param f Non-modifying callable to execute
+    /// @tparam RT Return value type for f
+    ///
+    /// @returns Value of RT returned from calling f
+    ///
+    /// @remarks Template parameter must be specified when passing anonymous
+    ///          lambdas of unclear return type (type deduction fails).
+    ///          For example:<br>
+    ///          `m.transact<bool>([](const UnsafeMapT &m) { return m.empty(); });`
     template<typename RT>
     RT transact(ConstTxn<RT> &&f) const {
         std::shared_lock lock(map_lock_);
         return f(*this);
     }
 
+    /// @brief Overloading wrapper allowing non-returning transactions to be
+    ///        written without explicitly specifying RT = void.
     void transact(ConstTxn<void> &&f) const {
         transact<void>(std::move(f));
     }
-
+    /// @}
     ///////////////////////////////////////////////////////////////////////////
-    ///////////////////// Pass-throughs for std::map //////////////////////////
-    ///////////////////////////////////////////////////////////////////////////
-    // Pass through all the type definitions (except those specific to
-    // situations where iterators can / must be used.
-    using key_type = typename MapT::key_type;
-    using mapped_type = typename MapT::mapped_type;
-    using value_type = typename MapT::value_type;
-    using size_type = typename MapT::size_type;
-    using difference_type = typename MapT::difference_type;
-    //using key_compare = typename MapT::key_compare;
-    //using value_compare = typename MapT::value_compare;
-    using allocator_type = typename MapT::allocator_type;
-    using reference = typename MapT::reference;
-    using const_reference = typename MapT::const_reference;
-    using pointer = typename MapT::pointer;
-    using const_pointer = typename MapT::const_pointer;
-    //using iterator = typename MapT::iterator;
-    //using const_iterator = typename MapT::const_iterator;
-    //using reverse_iterator = typename MapT::reverse_iterator;
-    //using const_reverse_iterator = typename MapT::const_reverse_iterator;
-    using node_type = typename MapT::node_type;
-    //using insert_return_type = typename MapT::insert_return_type;
-    ////TODO Base-class-specific using statements (e.g. hasher)
 
     ///////////////////////////////////////////////////////////////////////////
     /// @name Constructors
@@ -201,9 +227,49 @@ public:
     ///////////////////////////////////////////////////////////////////////////
 
     ///////////////////////////////////////////////////////////////////////////
-    /////////// Locking wrappers for existing std::map interfaces /////////////
+    /// @name Map typedef pass-throughs
+    /// Type definiton pass-throughs from the underlying MapT. Please refer to
+    /// the documentation for your MapT for details.
+    ///
+    /// @note Iterator, pointer, and reference types are excluded as they are
+    ///       not safe outside of locked contexts. Use transact() and
+    ///       UnsafeMapT::[type] when needing to use these types.
+    ///
+    /// @{
+    using key_type = typename MapT::key_type;
+    using mapped_type = typename MapT::mapped_type;
+    using value_type = typename MapT::value_type;
+    using size_type = typename MapT::size_type;
+    using difference_type = typename MapT::difference_type;
+    //using hasher = typename MapT::hasher;
+    //using key_equal = typename MapT::key_equal
+    using key_compare = typename MapT::key_compare;
+    using value_compare = typename MapT::value_compare;
+    using allocator_type = typename MapT::allocator_type;
+    //using reference = typename MapT::reference;
+    //using const_reference = typename MapT::const_reference;
+    //using pointer = typename MapT::pointer;
+    //using const_pointer = typename MapT::const_pointer;
+    //using iterator = typename MapT::iterator;
+    //using const_iterator = typename MapT::const_iterator;
+    //using reverse_iterator = typename MapT::reverse_iterator;
+    //using const_reverse_iterator = typename MapT::const_reverse_iterator;
+    using node_type = typename MapT::node_type;
+    //using insert_return_type = typename MapT::insert_return_type;
+    /// @}
     ///////////////////////////////////////////////////////////////////////////
-    SafeMapT& operator=(const SafeMapT &other) {
+
+    ///////////////////////////////////////////////////////////////////////////
+    /// @name Locking map method wrappers
+    /// Locking wrapper methods for underlying MapT. Please refer to the
+    /// documentation for your MapT for details.
+    ///
+    /// @note Interfaces operating on or returning Iterators, or returning
+    ///       references, are not safe outside of locked contexts and so are
+    ///       not included here. They can be accessed on the underlying map
+    ///       through transact().
+    /// @{
+    BaseSafeMap<MapT>& operator=(const BaseSafeMap<MapT> &other) {
         // Other is const, so we want shared mode. Defer locking until the
         // scoped_lock attempts to lock both mutexes (provides better deadlock
         // resistance).
@@ -215,13 +281,13 @@ public:
         return *this;
     }
 
-    SafeMapT& operator=(SafeMapT &&other) noexcept {
+    BaseSafeMap<MapT>& operator=(BaseSafeMap<MapT> &&other) noexcept {
         std::scoped_lock lock(map_lock_, other.map_lock_);
         MapT::operator=(std::move(other));
         return *this;
     }
 
-    SafeMapT& operator=(std::initializer_list<value_type> ilist) {
+    BaseSafeMap<MapT>& operator=(std::initializer_list<value_type> ilist) {
         std::unique_lock lock(map_lock_);
         MapT::operator=(ilist);
         return *this;
@@ -321,6 +387,8 @@ public:
     // skip equal_range - iterators
     // skip lower_bound and upper_bound - iterators
     // skip key_comp and value_comp - they can interact with iterators
+    /// @}
+    ///////////////////////////////////////////////////////////////////////////
 };
 
 // TODO comparison operator, std::swap(), and erase_if()
