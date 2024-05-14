@@ -32,26 +32,26 @@ erDiagram
     "uE Modules" ||..|{ NotificationSink : contains
 
     RpcClient {
-        public RpcClient(method)
-        public invokeMethod(arguments)
+        public RpcClient
+        public invokeMethod
     }
 
     RpcServer {
-        public RpcServer(method_and_callback)
+        public RpcServer
     }
 
     Publisher {
-        public Publisher(topic)
-        public publish(payload)
+        public Publisher
+        public publish
     }
 
     Subscriber {
-        static subscribe(topic_and_callback)
+        static subscribe
     }
 
     NotificationSource {
-        public NotificationSource(sink)
-        public notify(payload)
+        public NotificationSource
+        public notify
     }
 
     NotificationSink {
@@ -66,22 +66,22 @@ erDiagram
     NotificationSink }|--|| UTransport : uses
 
     UTransport {
-        public send(message)
-        public listen(callback)
-        public getDefaultUri()
-        virtual send()
-        virtual listen()
+        public send
+        public listen
+        public getDefaultUri
+        virtual send
+        virtual listen
     }
 
     UTransport ||..|| ZenohUTransport : "implemented by"
     UTransport ||..|| SomeIpUTransport : "implemented by"
 
     ZenohUTransport {
-        virtual send()
-        virtual listen()
+        virtual send
+        virtual listen
     }
 
     SomeIpUTransport {
-        virtual send()
-        virtual listen()
+        virtual send
+        virtual listen
 ```
