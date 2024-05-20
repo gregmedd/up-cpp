@@ -12,27 +12,12 @@ on the one before:
 * L1 Transport (`up-cpp/transport/`)
 * L2 Communications (`up-cpp/communications`)
 
-```mermaid
-erDiagram
-    "L1 Transport" ||..|{ "Transport Implementation" : "Implemented by"
-    "Datamodel" }|--|{ "Utilities" : uses
-
-    "L2 Communication" }|--|| "L1 Transport" : uses
-    "L2 Communication" }|--|{ "Datamodel" : uses
-    "L2 Communication" }|--|{ "Utilities" : uses
-    "L1 Transport" ||--|{ "Utilities" : uses
-    "L1 Transport" ||--|{ "Datamodel" : uses
-
-    "Transport Implementation" }|--|{ "Utilities" : uses
-```
-
 Most uE will operate at _Layer 2_, which provides interfaces for common
 communications models, such as pub/sub, notficiations, and RPC. This
 communications layer is composed of calls to _Layer 1_ for transport operations
-such as sending and listening for messages.
-
-In some limited cases, specialized uE may operate directly on the transport
-layer. uStreamer, for example, would be one such entity.
+such as sending and listening for messages. Note: In some limited cases,
+specialized uE may operate directly on the transport layer. uStreamer, for
+example, would be one such entity.
 
 _Layer 1_ transport is exposed as a single virtual `UTransport` interface,
 allowing for transport-independent at layers above this point. The actual
@@ -47,6 +32,20 @@ Finally, the _Utilities_ layer contains common objects and functions shared
 across up-cpp and transport implementations. Examples include objects for
 callback management (`CallbackConnection.h`), thread pools (`ThreadPool.h`),
 and more (`base64.h`).
+
+```mermaid
+erDiagram
+    "L1 Transport" ||..|{ "Transport Implementation" : "Implemented by"
+    "Datamodel" }|--|{ "Utilities" : uses
+
+    "L2 Communication" }|--|| "L1 Transport" : uses
+    "L2 Communication" }|--|{ "Datamodel" : uses
+    "L2 Communication" }|--|{ "Utilities" : uses
+    "L1 Transport" ||--|{ "Utilities" : uses
+    "L1 Transport" ||--|{ "Datamodel" : uses
+
+    "Transport Implementation" }|--|{ "Utilities" : uses
+```
 
 ## Classes and interfaces of up-cpp
 
