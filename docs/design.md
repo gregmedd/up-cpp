@@ -22,7 +22,7 @@ _L1 Transport_.
 # Overview
 
 High level:
-```mermaid
+```mermaid 
 classDiagram
     class RpcClient {
         - transport_
@@ -119,7 +119,7 @@ classDiagram
 ```
 
 uE using up-cpp (and a transport)
-```mermaid
+```mermaid 
 erDiagram
     uEntity ||--|{ "up-cpp L2 Comm" : uses
 
