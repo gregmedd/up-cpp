@@ -47,8 +47,101 @@ erDiagram
     "Transport Implementation" }|--|{ "Utilities" : uses
 ```
 
-## Classes and interfaces of up-cpp
+## Interaction model for uEntities
 
+A uEntity is an application or system component that communicates over
+uProtocol. These uE may be composed of multiple modules, each of which could
+operate on the interfaces of up-cpp (typically at _communication Layer 2_).
+
+The uE is responsible for providing a `std::shared_ptr<UTransport>` to each
+_Layer 2_ object instantiated, potentially through some platform abstraction
+provided by the uE's platform ecosystem.
+
+```mermaid
+erDiagram
+    uEntity ||--|{ "uEntity Modules" : contains
+    "uEntity Modules" ||--|{ "up-cpp L2 Comm" : uses
+
+    "up-cpp L2 Comm" }|--|| "up-cpp L1 Xport" : uses
+
+    "up-cpp L1 Xport" ||..|| ZenohUTransport : "implemented by"
+    "up-cpp L1 Xport" ||..|| VSomeIpUTransport : ""
+
+    uEntity ||--|| "uEntity Platform Abstraction": uses
+
+    "uEntity Platform Abstraction" ||--|| ZenohUTransport : ""
+    "uEntity Platform Abstraction" ||--|| VSomeIpUTransport : instantiates
+```
+
+up-cpp is responsible for providing **something about validation and protocol
+compliance, with the best results from using L2**.
+
+## Example interactions
+
+### Publisher / Subscriber
+
+```mermaid
+sequenceDiagram
+    box uEntity A
+    participant uE Main
+    participant uE Subscriber
+    end
+
+    box up-cpp
+    participant Subscriber
+    participant UTransport
+    end
+
+    box up-transport-example-cpp
+    participant ExampleUTransport
+    end
+
+    box up-cpp (B)
+    participant UTransport (B)
+    participant Publisher
+    end
+
+    box uEntity (B)
+    participant uE Publisher
+    end
+
+    autonumber
+
+    uE Main->>+ExampleUTransport: make_shared<FooUTransport>(config)
+    note right of uE Main: Could be instantiated using<br/>a platform abstraction<br/>provided by the uE's<br/>environment
+    ExampleUTransport->>-uE Main: give shared_ptr<FooUTransport>
+    uE Main->>+uE Subscriber: give shared_ptr<UTransport>
+    uE Subscriber->>+Subscriber: subscribe(transport, topic, callback)
+    Subscriber->>+UTransport: registerListener(topic, callback)
+    UTransport->>-Subscriber: ListenHandle OR UStatus
+    Subscriber->>-uE Subscriber: unique_ptr<Subscriber> OR UStatus
+    uE Subscriber->>-uE Main: 
+
+    uE Publisher-->uE Publisher: Running
+
+    uE Publisher->>+Publisher: publish(payload)
+    Publisher->>Publisher: [Build Message]
+    Publisher->>+UTransport (B): send(message)
+    UTransport (B)->>+ExampleUTransport: sendImpl(message)
+    par Result of send
+        ExampleUTransport->>-UTransport (B): give UStatus
+        UTransport (B)->>-Publisher: give UStatus
+        Publisher->>-uE Publisher: give UStatus
+    and Send over transport
+        activate ExampleUTransport
+        ExampleUTransport->>+uE Subscriber: callback(message)
+        deactivate uE Subscriber
+        deactivate ExampleUTransport
+    end
+```
+
+### RPC Client / Server
+
+### Error handling and propagation
+
+See [Error propagation model for up-cpp and related libraries](./error_propagation.md).
+
+## Classes and interfaces of up-cpp
 
 
 High level:
@@ -148,16 +241,30 @@ classDiagram
     UTransport <|.. VSomeIpUTransport : Implements
 ```
 
-uE using up-cpp (and a transport)
-```mermaid
-erDiagram
-    uEntity ||--|{ "up-cpp L2 Comm" : uses
+## Threading and synchronization model of up-cpp
 
-    "up-cpp L2 Comm" }|--|| UTransport : uses
+**TODO: Any L1 or L2 interface can and will be called by multiple threads. They
+must be thread safe**
 
-    UTransport ||..|| ZenohUTransport : "implemented by"
-    UTransport ||..|| VSomeIpUTransport : "implemented by"
+**TODO: Should the base UTransport have a thread pool for servicing callbacks?
+It doesn't seem like a good idea to rely on the transport implementations to
+handle that. Most likely, one thread pool per UTransport is adequate to handle
+the callbacks.**
 
-    uEntity ||--|| ZenohUTransport : "gets implementation"
-    uEntity ||--|| VSomeIpUTransport : "gets implementation"
-```
+**TODO: Any standard container will need to be mutex guarded. Recommend a
+shared_lock for read-heavy containers. Recommend SafeMap model for associative
+containers**
+
+**TODO: All registered callbacks need to be thread safe. They could be invoked
+multiple times simultaneously from different execution contexts. Hmm... is this
+really the reqirement we want to impose? Is there another way to serialize
+the requests (possibly through the connection objects?) without hogging all
+the pool resources?**
+
+_Possibly defer some design to the individual communication modules, looking
+only at their operation modes. Maybe UTransport shouldn't have any sort of
+thread pool_
+
+## Error handling and propagation
+
+See [Error propagation model for up-cpp and related libraries](./error_propagation.md).
