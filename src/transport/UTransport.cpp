@@ -30,12 +30,14 @@ UTransport::UTransport(const v1::UUri& defaultSrc)
 }
 
 v1::UStatus UTransport::send(const v1::UMessage& message) {
+#if 0
 	auto [msgOk, reason] = MessageValidator::isValid(message);
 	if (!msgOk) {
 		throw MessageValidator::InvalidUMessage(
 		    "Invalid UMessage | " +
 		    std::string(MessageValidator::message(*reason)));
 	}
+#endif
 
 	return sendImpl(message);
 }
@@ -67,9 +69,9 @@ UTransport::registerListener(const v1::UUri& sink_filter,
 	                                          std::move(source_filter));
 
 	if (status.code() == v1::UCode::OK) {
-		return utils::Expected<ListenHandle, v1::UStatus>(std::move(handle));
+		return std::move(handle);
 	} else {
-		return utils::Expected<ListenHandle, v1::UStatus>(std::move(status));
+		return utils::Unexpected(std::move(status));
 	}
 }
 
