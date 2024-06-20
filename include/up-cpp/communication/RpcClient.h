@@ -143,6 +143,7 @@ private:
 	struct ExpireService;
 
 	std::shared_ptr<transport::UTransport> transport_;
+	std::chrono::milliseconds ttl_;
 	datamodel::builder::UMessageBuilder builder_;
 	std::unique_ptr<ExpireService> expire_service_;
 };
