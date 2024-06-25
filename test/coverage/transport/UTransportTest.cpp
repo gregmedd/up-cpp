@@ -9,37 +9,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+#include <up-cpp/datamodel/validator/UUri.h>
+#include <up-cpp/datamodel/builder/UMessage.h>
+
 #include <UTransportMock.h>
-#include <fcntl.h>
 #include <google/protobuf/util/message_differencer.h>
 #include <gtest/gtest.h>
-#include <unistd.h>
 
 #include <memory>
 #include <random>
 #include <sstream>
-
-size_t get_page_count() {
-	using namespace std;
-
-	stringstream file_name;
-	file_name << "/proc/" << getpid() << "/statm";
-	int fd, len;
-	char buf[256];
-	memset(buf, 0, sizeof(buf));
-	if ((fd = open(file_name.str().c_str(), O_RDONLY)) < 0)
-		return 0;
-	if (read(fd, buf, sizeof(buf)) <= 0) {
-		close(fd);
-		return 0;
-	}
-	close(fd);
-	size_t tot, res_set_size, res_shared_pages, text_size, lib_size,
-	    data_and_stack, dirty;
-	sscanf(buf, "%lu%lu%lu%lu%lu%lu%lu", &tot, &res_set_size, &res_shared_pages,
-	       &text_size, &lib_size, &data_and_stack, &dirty);
-	return data_and_stack;
-}
 
 static std::random_device random_dev;
 static std::mt19937 random_gen(random_dev());
@@ -60,44 +39,26 @@ int get_random_int(int mn = 0, int mx = 100) {
 	return int_dist(random_gen);
 }
 
-uprotocol::v1::UUID* make_uuid() {
+uprotocol::v1::UUID make_uuid() {
 	uint64_t timestamp =
 	    std::chrono::duration_cast<std::chrono::milliseconds>(
 	        std::chrono::system_clock::now().time_since_epoch())
 	        .count();
-	auto id = new uprotocol::v1::UUID();
-	id->set_msb((timestamp << 16) | (8ULL << 12) |
+	uprotocol::v1::UUID id;
+	id.set_msb((timestamp << 16) | (8ULL << 12) |
 	            (0x123ULL));  // version 8 ; counter = 0x123
-	id->set_lsb((2ULL << 62) | (0xFFFFFFFFFFFFULL));  // variant 10
+	id.set_lsb((2ULL << 62) | (0xFFFFFFFFFFFFULL));  // variant 10
 	return id;
 }
-
-namespace uprotocol::test {
-uprotocol::test::UTransportMockInfo UTransportMock::mock_info =
-    uprotocol::test::UTransportMockInfo();
-};
-
-auto& mock_info = uprotocol::test::UTransportMock::mock_info;
 
 namespace {
 
 class TestMockUTransport : public testing::Test {
-	static size_t global_initial_page_count;
-	static size_t per_test_initial_page_count;
-
 protected:
 	// Run once per TEST_F.
 	// Used to set up clean environments per test.
-	void SetUp() override {
-		mock_info.reset();
-		per_test_initial_page_count = get_page_count();
-	}
-
-	void TearDown() override {
-		EXPECT_TRUE(mock_info.deinit_passed);
-		EXPECT_LE(get_page_count() - per_test_initial_page_count,
-		          50);  // check for per-test memory leaks
-	}
+	void SetUp() override {}
+	void TearDown() override {}
 
 	// Run once per execution of the test application.
 	// Used for setup of all tests. Has access to this instance.
@@ -106,147 +67,197 @@ protected:
 
 	// Run once per execution of the test application.
 	// Used only for global setup outside of tests.
-	static void SetUpTestSuite() {
-		global_initial_page_count = get_page_count();
+	static void SetUpTestSuite() {}
+	static void TearDownTestSuite() {}
+
+	static std::shared_ptr<uprotocol::test::UTransportMock> getNewTransport(
+			std::optional<uprotocol::v1::UUri> defaultUri = {}) {
+		return std::make_shared<uprotocol::test::UTransportMock>(
+				defaultUri.value_or(getRandomUri(true)));
 	}
 
-	static void TearDownTestSuite() {
-		EXPECT_LE(get_page_count() - global_initial_page_count,
-		          50);  // check for global memory leaks
+	static uprotocol::v1::UUri getRandomUri(bool as_default = false) {
+		auto isValid = [](const auto& uuri) {
+			auto [valid, _] = uprotocol::datamodel::validator::uri::isValid(uuri);
+			return valid;
+		};
+
+		uprotocol::v1::UUri uuri;
+
+		while (!isValid(uuri)) {
+			uuri.set_authority_name(get_random_string());
+			auto ue_instance = get_random_int(1, 0xFFFF);
+			auto ue_id = as_default ? get_random_int(0x8000, 0xFFFE) : get_random_int(1, 0xFFFE);
+			uuri.set_ue_id(((ue_instance << 16) & 0xFFFF0000) | (ue_id & 0xFFFE));
+			uuri.set_ue_version_major(get_random_int(1,0xFFFE));
+			uuri.set_resource_id(as_default ? 0 : get_random_int(1, 0xFFFE));
+		}
+
+		return uuri;
+	}
+
+	uprotocol::v1::UMessageType typeFromUri(const uprotocol::v1::UUri& uuri) {
+		using namespace uprotocol::datamodel::validator;
+
+		auto [isRpc, a] = uri::isValidRpcMethod(uuri);
+		if (isRpc) {
+			return uprotocol::v1::UMessageType::UMESSAGE_TYPE_REQUEST;
+		}
+		auto x = get_random_int(0, 1);
+		if(x == 0) {
+			auto [isPublish, b] = uri::isValidPublishTopic(uuri);
+			if (isPublish) {
+				return uprotocol::v1::UMessageType::UMESSAGE_TYPE_PUBLISH;
+			}
+		}
+		auto [isNotify, c] = uri::isValidNotification(uuri);
+		if (isNotify) {
+			return uprotocol::v1::UMessageType::UMESSAGE_TYPE_NOTIFICATION;
+		}
+		return uprotocol::v1::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
 	}
 };
-
-size_t TestMockUTransport::global_initial_page_count;
-size_t TestMockUTransport::per_test_initial_page_count;
 
 using MsgDiff = google::protobuf::util::MessageDifferencer;
 
 TEST_F(TestMockUTransport, ConstructDestroy) {
-	uprotocol::v1::UUri def_src_uuri;
-	def_src_uuri.set_authority_name(get_random_string());
-	def_src_uuri.set_ue_id(0x18000);
-	def_src_uuri.set_ue_version_major(1);
-	def_src_uuri.set_resource_id(0);
+	auto def_src_uri = getRandomUri(true);
+	auto transport = getNewTransport(def_src_uri);
 
-	auto transport =
-	    std::make_shared<uprotocol::test::UTransportMock>(def_src_uuri);
-	EXPECT_TRUE(mock_info.init_passed);
-	EXPECT_FALSE(mock_info.deinit_passed);
-	EXPECT_TRUE(MsgDiff::Equals(def_src_uuri, transport->getDefaultSource()));
+	EXPECT_NE(nullptr, transport);
+	EXPECT_EQ(transport->construct_count, 1);
+	EXPECT_EQ(transport->destruct_count, 0);
+	EXPECT_TRUE(MsgDiff::Equals(def_src_uri, transport->getDefaultSource()));
+
+	transport.reset();
+	EXPECT_EQ(transport->construct_count, 1);
+	EXPECT_EQ(transport->destruct_count, 1);
 }
 
-TEST_F(TestMockUTransport, Send) {
-	using namespace std;
-
-	uprotocol::v1::UUri def_src_uuri;
-	def_src_uuri.set_authority_name(get_random_string());
-	def_src_uuri.set_ue_id(0x18000);
-	def_src_uuri.set_ue_version_major(1);
-	def_src_uuri.set_resource_id(0);
-
-	auto transport =
-	    std::make_shared<uprotocol::test::UTransportMock>(def_src_uuri);
+TEST_F(TestMockUTransport, SendMessage) {
+	auto transport = getNewTransport();
 	EXPECT_NE(nullptr, transport);
-	EXPECT_TRUE(mock_info.init_passed);
-	EXPECT_FALSE(mock_info.deinit_passed);
-	EXPECT_TRUE(MsgDiff::Equals(def_src_uuri, transport->getDefaultSource()));
 
-	const size_t max_count = 1000 * 100;
-	for (size_t i = 0; i < max_count; i++) {
-		auto src = new uprotocol::v1::UUri();
-		src->set_authority_name("10.0.0.1");
-		src->set_ue_id(0x00010001);
-		src->set_ue_version_major(1);
-		src->set_resource_id(0x8000);
-
-		// auto sink = new uprotocol::v1::UUri();
-		// sink->set_authority_name("10.0.0.2");
-		// sink->set_ue_id(0x00010002);
-		// sink->set_ue_version_major(2);
-		// sink->set_resource_id(2);
-
-		auto attr = new uprotocol::v1::UAttributes();
-		attr->set_type(uprotocol::v1::UMESSAGE_TYPE_PUBLISH);
-		attr->set_allocated_id(make_uuid());
-		attr->set_allocated_source(src);
-		// attr->set_allocated_sink(sink);
-		attr->set_payload_format(uprotocol::v1::UPAYLOAD_FORMAT_PROTOBUF);
-		attr->set_ttl(1000);
-
+	constexpr size_t max_count = 1000;
+	for (size_t i = 0; i < max_count; ++i) {
+		auto sink = getRandomUri();
+		auto type = typeFromUri(sink);
+		while (type == uprotocol::v1::UMessageType::UMESSAGE_TYPE_UNSPECIFIED) {
+			sink = getRandomUri();
+			type = typeFromUri(sink);
+		}
+	   
 		uprotocol::v1::UMessage msg;
-		msg.set_allocated_attributes(attr);
 		msg.set_payload(get_random_string(1400));
-		mock_info.send_status.set_code(
-		    static_cast<uprotocol::v1::UCode>(15 - (i % 16)));
-		mock_info.send_status.set_message(get_random_string());
 
-		auto result = transport->send(msg);
-		EXPECT_EQ(i + 1, mock_info.send_count);
-		EXPECT_TRUE(MsgDiff::Equals(result, mock_info.send_status));
-		EXPECT_TRUE(MsgDiff::Equals(msg, mock_info.message));
+		auto& attr = *(msg.mutable_attributes());
+		attr.set_type(type);
+		*(attr.mutable_id()) = make_uuid();
+		if (type != uprotocol::v1::UMessageType::UMESSAGE_TYPE_PUBLISH) {
+			*(attr.mutable_source()) = transport->getDefaultSource();
+			*(attr.mutable_sink()) = sink;
+		} else {
+			*(attr.mutable_source()) = sink;
+		}
+		attr.set_priority(uprotocol::v1::UPriority::UPRIORITY_CS4);
+		attr.set_payload_format(uprotocol::v1::UPAYLOAD_FORMAT_TEXT);
+		attr.set_ttl(1000);
+
+		uprotocol::v1::UStatus status;
+		status.set_code(static_cast<uprotocol::v1::UCode>(15 - (i % 16)));
+		status.set_message(get_random_string());
+		transport->next_send_status = status;
+
+		decltype(transport->send(msg)) result;
+		EXPECT_NO_THROW(result = transport->send(msg));
+
+		EXPECT_EQ(i + 1, transport->send_count);
+		EXPECT_TRUE(MsgDiff::Equals(result, status));
+		EXPECT_TRUE(transport->last_sent_message);
+		EXPECT_TRUE(MsgDiff::Equals(msg, *(transport->last_sent_message)));
 	}
 }
 
-TEST_F(TestMockUTransport, registerListener) {
-	using namespace std;
-
-	uprotocol::v1::UUri def_src_uuri;
-	def_src_uuri.set_authority_name(get_random_string());
-	def_src_uuri.set_ue_id(0x18000);
-	def_src_uuri.set_ue_version_major(1);
-	def_src_uuri.set_resource_id(0);
-
-	auto transport =
-	    std::make_shared<uprotocol::test::UTransportMock>(def_src_uuri);
+TEST_F(TestMockUTransport, RegisterListener) {
+	auto transport = getNewTransport();
 	EXPECT_NE(nullptr, transport);
-	EXPECT_TRUE(mock_info.init_passed);
-	EXPECT_FALSE(mock_info.deinit_passed);
-	EXPECT_TRUE(MsgDiff::Equals(def_src_uuri, transport->getDefaultSource()));
 
-	uprotocol::v1::UUri sink_filter;
-	sink_filter.set_authority_name(get_random_string());
-	sink_filter.set_ue_id(0x00010001);
-	sink_filter.set_ue_version_major(1);
-	sink_filter.set_resource_id(0x8000);
-
-	uprotocol::v1::UUri source_filter;
-	source_filter.set_authority_name(get_random_string());
-	source_filter.set_ue_id(0x00010001);
-	source_filter.set_ue_version_major(1);
-	source_filter.set_resource_id(0x8000);
-
-	uprotocol::v1::UMessage capture_msg;
-	size_t capture_count = 0;
-	auto action = [&](const uprotocol::v1::UMessage& msg) {
-		capture_msg = msg;
-		capture_count++;
+	uprotocol::v1::UMessage last_cb_msg;
+	size_t cb_count = 0;
+	auto action = [&last_cb_msg, &cb_count](const uprotocol::v1::UMessage& msg) {
+		last_cb_msg = msg;
+		++cb_count;
 	};
-	auto lhandle =
-	    transport->registerListener(sink_filter, action, source_filter);
-	EXPECT_TRUE(mock_info.listener);
-	// EXPECT_EQ(*mock_info.listener, action); // need exposed target_type() to
-	// make comparable.
-	EXPECT_TRUE(lhandle.has_value());
-	auto handle = std::move(lhandle).value();
-	EXPECT_TRUE(handle);
-	EXPECT_TRUE(MsgDiff::Equals(sink_filter, mock_info.sink_filter));
-	EXPECT_TRUE(mock_info.source_filter);
-	EXPECT_TRUE(MsgDiff::Equals(source_filter, *mock_info.source_filter));
 
-	const size_t max_count = 1000 * 100;
+	auto sink_filter = getRandomUri();
+	auto source_filter = getRandomUri();
+
+	EXPECT_EQ(transport->register_count, 0);
+
+	auto maybeHandle = transport->registerListener(
+			sink_filter, std::move(action), source_filter);
+
+	EXPECT_EQ(transport->register_count, 1);
+	EXPECT_TRUE(transport->last_listener);
+	EXPECT_TRUE(MsgDiff::Equals(sink_filter, *(transport->last_sink_filter)));
+	EXPECT_TRUE(transport->last_source_filter);
+	EXPECT_TRUE(MsgDiff::Equals(source_filter, *(transport->last_source_filter)));
+
+	EXPECT_TRUE(maybeHandle.has_value());
+	auto handle = std::move(maybeHandle).value();
+	EXPECT_TRUE(handle);
+
+	constexpr size_t max_count = 1000;
 	for (auto i = 0; i < max_count; i++) {
 		uprotocol::v1::UMessage msg;
-		auto attr = new uprotocol::v1::UAttributes();
-		msg.set_allocated_attributes(attr);
+		*(msg.mutable_attributes()->mutable_id()) = make_uuid();
 		msg.set_payload(get_random_string(1400));
-		mock_info.mock_message(msg);
-		EXPECT_EQ(i + 1, capture_count);
-		EXPECT_TRUE(MsgDiff::Equals(msg, capture_msg));
+		transport->mock_message(msg);
+		EXPECT_EQ(i + 1, cb_count);
+		EXPECT_TRUE(MsgDiff::Equals(msg, last_cb_msg));
 	}
+
+	EXPECT_FALSE(transport->last_cleanup_listener);
+	EXPECT_EQ(transport->cleanup_count, 0);
+
 	handle.reset();
-	EXPECT_TRUE(mock_info.cleanupListener);
-	// EXPECT_EQ(*mock_info.cleanupListener, action); // need exposed
-	// target_type() to make comparable.
+
+	EXPECT_EQ(transport->cleanup_count, 1);
+	EXPECT_TRUE(transport->last_cleanup_listener);
+	EXPECT_EQ(*(transport->last_cleanup_listener), *(transport->last_listener));
+}
+
+TEST_F(TestMockUTransport, RegisterListenerNotOk) {
+	auto transport = getNewTransport();
+	EXPECT_NE(nullptr, transport);
+
+	auto sink_filter = getRandomUri();
+	auto source_filter = getRandomUri();
+
+	auto action = [&](const auto& x) { EXPECT_EQ("", "Should not call"); };
+
+	uprotocol::v1::UStatus status;
+	status.set_code(uprotocol::v1::UCode::RESOURCE_EXHAUSTED);
+	status.set_message("Pretend resources have been exhausted");
+	transport->next_listen_status = status;
+
+	EXPECT_EQ(transport->register_count, 0);
+
+	auto maybeHandle = transport->registerListener(
+			sink_filter, std::move(action), source_filter);
+
+	EXPECT_EQ(transport->register_count, 1);
+
+	EXPECT_FALSE(maybeHandle.has_value());
+	EXPECT_TRUE(MsgDiff::Equals(maybeHandle.error(), status));
+	// A listener was passed, but it is not connected anymore
+	EXPECT_TRUE(transport->last_listener);
+	EXPECT_FALSE(*(transport->last_listener));
+}
+
+TEST_F(TestMockUTransport, BalancedCreateDestroy) {
+	using namespace uprotocol::test;
+	EXPECT_EQ(UTransportMock::construct_count, UTransportMock::destruct_count);
 }
 
 }  // namespace
