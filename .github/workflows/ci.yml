@@ -131,13 +131,13 @@ jobs:
       - name: Build up-core-api conan package
         shell: bash
         run: |
-          conan create --version 1.5.8 --build=missing --settings=build_type=Debug  up-conan-recipes/up-core-api/developer
+          conan create --version 1.5.8 up-conan-recipes/up-core-api/developer
 
       - name: Build up-cpp with tests
         shell: bash
         run: |
           cd up-cpp
-          conan install . --settings=build_type=Debug --build=missing
+          conan install . --settings=build_type=Debug --settings='*:build_type=Release' --build=missing
           cd build
           cmake -S .. -DCMAKE_TOOLCHAIN_FILE=Debug/generators/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=yes
           cmake --build . -- -j
