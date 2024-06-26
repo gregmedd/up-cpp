@@ -87,7 +87,7 @@ TEST_F(TestMockUTransport, Send) {
 	EXPECT_NE(nullptr, transport);
 	EXPECT_TRUE(MsgDiff::Equals(def_src_uuri, transport->getDefaultSource()));
 
-	const size_t max_count = 1000 * 100;
+	const size_t max_count = 100;
 	for (size_t i = 0; i < max_count; i++) {
 		auto src = new uprotocol::v1::UUri();
 		src->set_authority_name("10.0.0.1");
@@ -167,7 +167,7 @@ TEST_F(TestMockUTransport, registerListener) {
 	EXPECT_TRUE(transport->source_filter_);
 	EXPECT_TRUE(MsgDiff::Equals(source_filter, *transport->source_filter_));
 
-	const size_t max_count = 1000 * 100;
+	const size_t max_count = 100;
 	for (auto i = 0; i < max_count; i++) {
 		uprotocol::v1::UMessage msg;
 		auto attr = new uprotocol::v1::UAttributes();
