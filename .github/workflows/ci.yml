@@ -185,7 +185,7 @@ jobs:
                    --trace-children=yes \
                    --log-file=valgrind-memcheck.log \
                    --gen-suppressions=all \
-                   ctest -jE "$exclude_tests"
+                   ctest -j -E "$exclude_tests"
 
       - name: Run Valgrind ThreadCheck
         continue-on-error: true
@@ -197,7 +197,7 @@ jobs:
           valgrind --tool=drd \
                    --trace-children=yes \
                    --log-file=valgrind-threadcheck.log \
-                   ctest -jE "$exclude_tests"
+                   ctest -j -E "$exclude_tests"
           echo "ThreadCheck log:"
           cat valgrind-threadcheck.log
         
@@ -211,7 +211,7 @@ jobs:
           valgrind --tool=helgrind \
                    --trace-children=yes \
                    --log-file=valgrind-helgrind.log \
-                   ctest -jE "$exclude_tests"
+                   ctest -j -E "$exclude_tests"
           echo "Helgrind log:"
           cat valgrind-helgrind.log
 
@@ -225,7 +225,7 @@ jobs:
           valgrind --tool=dhat \
                    --trace-children=yes \
                    --log-file=valgrind-dhat.log \
-                   ctest -jE "$exclude_tests"
+                   ctest -j -E "$exclude_tests"
           echo "DHAT log:"
           cat valgrind-dhat.log
 
