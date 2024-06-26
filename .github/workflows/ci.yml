@@ -153,18 +153,6 @@ jobs:
           name: debug-build-artifacts
           path: up-cpp/build
 
-      - name: Upload compile commands
-        uses: actions/upload-artifact@v4
-        with:
-          name: compile-commands
-          path: up-cpp/build/compile_commands.json
-
-      - name: Upload conan cache for linting
-        uses: actions/upload-artifact@v4
-        with:
-          name: conan-cache
-          path: ./conan-cache.tgz
-
 # NOTE: Run dynamic analysis in unit tests
   valgrind:
     name: Run up-cpp tests with Valgrind
