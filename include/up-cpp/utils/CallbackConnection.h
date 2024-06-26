@@ -294,7 +294,9 @@ struct [[nodiscard]] CalleeHandle {
 			if (cleanup_) {
 				(*cleanup_)({locked_connection,
 				             typename Conn::PrivateConstructToken()});
-				cleanup_.reset();
+				if (leaked_ != nullptr) {
+					cleanup_.reset();
+				}
 			}
 		}
 	}
@@ -321,7 +323,7 @@ private:
 	std::weak_ptr<Conn> connection_;
 	std::shared_ptr<typename Conn::Callback> callback_;
 	std::optional<typename Conn::Cleanup> cleanup_;
-	int* leaked_;
+	int* leaked_{nullptr};
 };
 
 /// @brief Thrown if a default constructed or reset() CallerHandle is called.
