@@ -259,6 +259,7 @@ struct [[nodiscard]] CalleeHandle {
 			    "Attempted to create a connected CalleeHandle with bad "
 			    "callback pointer");
 		}
+		leaked_ = new int(7);
 	}
 
 	/// @brief CalleeHandles can be move constructed
@@ -320,6 +321,7 @@ private:
 	std::weak_ptr<Conn> connection_;
 	std::shared_ptr<typename Conn::Callback> callback_;
 	std::optional<typename Conn::Cleanup> cleanup_;
+	int* leaked_;
 };
 
 /// @brief Thrown if a default constructed or reset() CallerHandle is called.
