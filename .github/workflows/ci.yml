@@ -131,7 +131,7 @@ jobs:
       - name: Build up-core-api conan package
         shell: bash
         run: |
-          conan create --version 1.5.8 --settings=build_type=Debug  up-conan-recipes/up-core-api/developer
+          conan create --version 1.5.8 --build=missing --settings=build_type=Debug  up-conan-recipes/up-core-api/developer
 
       - name: Build up-cpp with tests
         shell: bash
