@@ -99,17 +99,83 @@ jobs:
           name: test-results
           path: 'up-cpp/build/test/results/*.xml'
 
+  debug-build:
+    name: Debug build up-cpp and dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Conan
+        id: conan
+        uses: turtlebrowser/get-conan@main
+        with:
+          version: 2.3.2
+
+      - name: Fetch up-cpp
+        uses: actions/checkout@v4
+        with:
+          path: up-cpp
+
+      - name: Install conan CI profile
+        shell: bash
+        run: |
+          conan profile detect
+          cp up-cpp/.github/workflows/ci_conan_profile "$(conan profile path default)"
+          conan profile show
+
+      - name: Fetch up-core-api conan recipe
+        uses: actions/checkout@v4
+        with:
+          path: up-conan-recipes
+          repository: eclipse-uprotocol/up-conan-recipes
+
+      - name: Build up-core-api conan package
+        shell: bash
+        run: |
+          conan create --version 1.5.8 --settings=build_type=Debug  up-conan-recipes/up-core-api/developer
+
+      - name: Build up-cpp with tests
+        shell: bash
+        run: |
+          cd up-cpp
+          conan install . --settings=build_type=Debug --build=missing
+          cd build
+          cmake -S .. -DCMAKE_TOOLCHAIN_FILE=Debug/generators/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=yes
+          cmake --build . -- -j
+
+      - name: Save conan cache to archive
+        shell: bash
+        run: |
+          conan cache save --file ./conan-cache.tgz '*'
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-build-artifacts
+          path: up-cpp/build
+
+      - name: Upload compile commands
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-commands
+          path: up-cpp/build/compile_commands.json
+
+      - name: Upload conan cache for linting
+        uses: actions/upload-artifact@v4
+        with:
+          name: conan-cache
+          path: ./conan-cache.tgz
+
 # NOTE: Run dynamic analysis in unit tests
   valgrind:
     name: Run up-cpp tests with Valgrind
     runs-on: ubuntu-latest
-    needs: build
+    needs: debug-build
 
     steps:
       - name: Get build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: build-artifacts
+          name: debug-build-artifacts
           path: up-cpp/build
 
       - name: Install Valgrind
@@ -125,37 +191,25 @@ jobs:
           echo "Running Memcheck..."
           exclude_tests=$(cat valgrind_exclude_tests.txt | tr '\n' '|' | sed 's/|$//')
           echo "Excluding tests: $exclude_tests"
-          set +e
           valgrind --leak-check=full \
                    --show-leak-kinds=all \
                    --track-origins=yes \
                    --trace-children=yes \
-                   --verbose \
                    --log-file=valgrind-memcheck.log \
                    --gen-suppressions=all \
-                   ctest -E "$exclude_tests"
-
-          exit_code=$?
-          set -e
-
-          if [ $exit_code -ne 0 ]; then
-            touch memcheck_failed_output.log
-            echo "Some tests failed. Capturing the logs..."
-            cat Testing/Temporary/LastTest.log | tee -a memcheck_failed_output.log
-          else
-            echo "No tests failed."
-            touch memcheck_failed_output.log
-          fi
+                   ctest -jE "$exclude_tests"
 
       - name: Run Valgrind ThreadCheck
         continue-on-error: true
         run: |
           cd up-cpp/build
           echo "Running ThreadCheck..."
+          exclude_tests=$(cat valgrind_exclude_tests.txt | tr '\n' '|' | sed 's/|$//')
+          echo "Excluding tests: $exclude_tests"
           valgrind --tool=drd \
                    --trace-children=yes \
                    --log-file=valgrind-threadcheck.log \
-                   ctest
+                   ctest -jE "$exclude_tests"
           echo "ThreadCheck log:"
           cat valgrind-threadcheck.log
         
@@ -164,10 +218,12 @@ jobs:
         run: |
           cd up-cpp/build
           echo "Running Helgrind..."
+          exclude_tests=$(cat valgrind_exclude_tests.txt | tr '\n' '|' | sed 's/|$//')
+          echo "Excluding tests: $exclude_tests"
           valgrind --tool=helgrind \
                    --trace-children=yes \
                    --log-file=valgrind-helgrind.log \
-                   ctest
+                   ctest -jE "$exclude_tests"
           echo "Helgrind log:"
           cat valgrind-helgrind.log
 
@@ -176,10 +232,12 @@ jobs:
         run: |
           cd up-cpp/build
           echo "Running DHAT (Data Address Translation)..."
+          exclude_tests=$(cat valgrind_exclude_tests.txt | tr '\n' '|' | sed 's/|$//')
+          echo "Excluding tests: $exclude_tests"
           valgrind --tool=dhat \
                    --trace-children=yes \
                    --log-file=valgrind-dhat.log \
-                   ctest
+                   ctest -jE "$exclude_tests"
           echo "DHAT log:"
           cat valgrind-dhat.log
 
