@@ -12,6 +12,9 @@
 #include <google/protobuf/util/message_differencer.h>
 #include <gtest/gtest.h>
 #include <up-cpp/communication/RpcClient.h>
+#include <up-cpp/datamodel/builder/Uuid.h>
+#include <up-cpp/datamodel/builder/Payload.h>
+#include <up-cpp/datamodel/serializer/Uuid.h>
 #include <up-cpp/datamodel/validator/UMessage.h>
 
 #include "UTransportMock.h"
@@ -19,6 +22,29 @@
 using namespace std::chrono_literals;
 
 namespace {
+
+bool operator==(const uprotocol::v1::UUri& lhs,
+                const uprotocol::v1::UUri& rhs) {
+	using namespace google::protobuf::util;
+	return MessageDifferencer::Equals(lhs, rhs);
+}
+
+bool operator==(const uprotocol::v1::UMessage& lhs,
+                const uprotocol::v1::UMessage& rhs) {
+	using namespace google::protobuf::util;
+	return MessageDifferencer::Equals(lhs, rhs);
+}
+
+bool operator==(const uprotocol::v1::UStatus& lhs,
+                const uprotocol::v1::UStatus& rhs) {
+	using namespace google::protobuf::util;
+	return MessageDifferencer::Equals(lhs, rhs);
+}
+
+bool operator==(const uprotocol::v1::UStatus& lhs,
+                const uprotocol::v1::UCode& rhs) {
+	return lhs.code() == rhs;
+}
 
 class RpcClientTest : public testing::Test {
 protected:
@@ -66,38 +92,50 @@ protected:
 		return uri;
 	}
 
+	void validateLastRequest(size_t expected_send_count) {
+		EXPECT_TRUE(transport_->listener_);
+		EXPECT_TRUE(transport_->sink_filter_ == defaultSourceUri());
+		EXPECT_TRUE(transport_->source_filter_);
+		EXPECT_TRUE(*(transport_->source_filter_) == methodUri());
+		EXPECT_EQ(transport_->send_count_, expected_send_count);
+		using namespace uprotocol::datamodel::validator;
+		auto [valid_request, _] = message::isValidRpcRequest(transport_->message_);
+		EXPECT_TRUE(valid_request);
+	}
+
 	std::shared_ptr<uprotocol::test::UTransportMock> transport_;
 };
 
-bool operator==(const uprotocol::v1::UUri& lhs,
-                const uprotocol::v1::UUri& rhs) {
-	using namespace google::protobuf::util;
-	return MessageDifferencer::Equals(lhs, rhs);
+template <typename StatusT, typename ExpectedT>
+void checkErrorResponse(const uprotocol::communication::RpcClient::MessageOrStatus& maybe_response, ExpectedT expected_status) {
+	EXPECT_FALSE(maybe_response);
+	if (!maybe_response) {
+		auto& some_status = maybe_response.error();
+		EXPECT_TRUE(std::holds_alternative<StatusT>(some_status));
+		if (std::holds_alternative<StatusT>(some_status)) {
+			auto& status = std::get<StatusT>(some_status);
+			EXPECT_TRUE(status == expected_status);
+		}
+	}
 }
 
-bool operator==(const uprotocol::v1::UMessage& lhs,
-                const uprotocol::v1::UMessage& rhs) {
-	using namespace google::protobuf::util;
-	return MessageDifferencer::Equals(lhs, rhs);
+uprotocol::datamodel::builder::Payload fakePayload() {
+	using namespace uprotocol::datamodel;
+
+	auto uuid = builder::UuidBuilder::getBuilder();
+	auto uuid_str = serializer::uuid::AsString::serialize(uuid.build());
+
+	return builder::Payload(std::move(uuid_str), uprotocol::v1::UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
 }
 
-bool operator==(const uprotocol::v1::UStatus& lhs,
-                const uprotocol::v1::UStatus& rhs) {
-	using namespace google::protobuf::util;
-	return MessageDifferencer::Equals(lhs, rhs);
-}
-
-bool operator==(const uprotocol::v1::UStatus& lhs,
-                const uprotocol::v1::UCode& rhs) {
-	return lhs.code() == rhs;
-}
-
+///////////////////////////////////////////////////////////////////////////////
 TEST_F(RpcClientTest, CanConstructWithoutExceptions) {
 	EXPECT_NO_THROW(auto client = uprotocol::communication::RpcClient(
 	                    transport_, methodUri(),
 	                    uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms););
 }
 
+///////////////////////////////////////////////////////////////////////////////
 TEST_F(RpcClientTest, InvokeFutureWithoutPayload) {
 	auto client = uprotocol::communication::RpcClient(
 	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
@@ -106,15 +144,8 @@ TEST_F(RpcClientTest, InvokeFutureWithoutPayload) {
 	EXPECT_NO_THROW(invoke_future = client.invokeMethod());
 
 	EXPECT_TRUE(invoke_future.valid());
-	EXPECT_TRUE(transport_->listener_);
-	EXPECT_TRUE(transport_->sink_filter_ == defaultSourceUri());
-	EXPECT_TRUE(transport_->source_filter_);
-	EXPECT_TRUE(*(transport_->source_filter_) == methodUri());
-	EXPECT_EQ(transport_->send_count_, 1);
+	validateLastRequest(1);
 	EXPECT_TRUE(transport_->message_.payload().empty());
-	using namespace uprotocol::datamodel::validator;
-	auto [valid_request, _] = message::isValidRpcRequest(transport_->message_);
-	EXPECT_TRUE(valid_request);
 
 	using UMessageBuilder = uprotocol::datamodel::builder::UMessageBuilder;
 	auto response_builder = UMessageBuilder::response(transport_->message_);
@@ -131,17 +162,16 @@ TEST_F(RpcClientTest, InvokeFutureWithoutPayload) {
 	}
 }
 
-template <typename StatusT, typename ExpectedT>
-void checkErrorResponse(const uprotocol::communication::RpcClient::MessageOrStatus& maybe_response, ExpectedT expected_status) {
-	EXPECT_FALSE(maybe_response);
-	if (!maybe_response) {
-		auto& some_status = maybe_response.error();
-		EXPECT_TRUE(std::holds_alternative<StatusT>(some_status));
-		if (std::holds_alternative<StatusT>(some_status)) {
-			auto& status = std::get<StatusT>(some_status);
-			EXPECT_TRUE(status == expected_status);
-		}
-	}
+TEST_F(RpcClientTest, InvokeFutureWithoutPayloadAndFormatSet) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms,
+		uprotocol::v1::UPayloadFormat::UPAYLOAD_FORMAT_SOMEIP);
+
+	EXPECT_THROW(auto invoke_future = client.invokeMethod(),
+		uprotocol::datamodel::builder::UMessageBuilder::UnexpectedFormat);
+
+	EXPECT_EQ(transport_->send_count_, 0);
+	EXPECT_FALSE(transport_->listener_);
 }
 
 TEST_F(RpcClientTest, InvokeFutureWithoutPayloadTimeout) {
@@ -242,5 +272,183 @@ TEST_F(RpcClientTest, InvokeFutureWithoutPayloadCommstatus) {
 		checkErrorResponse<uprotocol::v1::UCode>(maybe_response, uprotocol::v1::UCode::PERMISSION_DENIED);
 	}
 }
+
+///////////////////////////////////////////////////////////////////////////////
+TEST_F(RpcClientTest, InvokeFutureWithPayload) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
+
+	auto payload = fakePayload();
+	auto payload_content = payload.buildCopy();
+
+	decltype(client.invokeMethod(std::move(payload))) invoke_future;
+	EXPECT_NO_THROW(invoke_future = client.invokeMethod(std::move(payload)));
+
+	EXPECT_TRUE(invoke_future.valid());
+	validateLastRequest(1);
+	using PayloadField = uprotocol::datamodel::builder::Payload::PayloadType;
+	EXPECT_EQ(transport_->message_.payload(), std::get<PayloadField::Data>(payload_content));
+	EXPECT_EQ(transport_->message_.attributes().payload_format(), std::get<PayloadField::Format>(payload_content));
+
+	using UMessageBuilder = uprotocol::datamodel::builder::UMessageBuilder;
+	auto response_builder = UMessageBuilder::response(transport_->message_);
+	auto response = response_builder.build();
+	EXPECT_NO_THROW(transport_->mockMessage(response));
+
+	auto is_ready = invoke_future.wait_for(0ms);
+
+	EXPECT_EQ(is_ready, std::future_status::ready);
+	if (is_ready == std::future_status::ready) {
+		auto maybe_response = invoke_future.get();
+		EXPECT_TRUE(maybe_response);
+		EXPECT_TRUE(response == maybe_response.value());
+	}
+}
+
+TEST_F(RpcClientTest, InvokeFutureWithPayloadAndFormatSet) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms,
+		uprotocol::v1::UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
+
+	auto payload = fakePayload();
+	auto payload_content = payload.buildCopy();
+
+	decltype(client.invokeMethod(std::move(payload))) invoke_future;
+	EXPECT_NO_THROW(invoke_future = client.invokeMethod(std::move(payload)));
+
+	EXPECT_TRUE(invoke_future.valid());
+	validateLastRequest(1);
+	using PayloadField = uprotocol::datamodel::builder::Payload::PayloadType;
+	EXPECT_EQ(transport_->message_.payload(), std::get<PayloadField::Data>(payload_content));
+	EXPECT_EQ(transport_->message_.attributes().payload_format(), std::get<PayloadField::Format>(payload_content));
+
+	using UMessageBuilder = uprotocol::datamodel::builder::UMessageBuilder;
+	auto response_builder = UMessageBuilder::response(transport_->message_);
+	auto response = response_builder.build();
+	EXPECT_NO_THROW(transport_->mockMessage(response));
+
+	auto is_ready = invoke_future.wait_for(0ms);
+
+	EXPECT_EQ(is_ready, std::future_status::ready);
+	if (is_ready == std::future_status::ready) {
+		auto maybe_response = invoke_future.get();
+		EXPECT_TRUE(maybe_response);
+		EXPECT_TRUE(response == maybe_response.value());
+	}
+}
+
+TEST_F(RpcClientTest, InvokeFutureWithPayloadAndWrongFormatSet) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms,
+		uprotocol::v1::UPayloadFormat::UPAYLOAD_FORMAT_JSON);
+
+	EXPECT_THROW(auto invoke_future = client.invokeMethod(fakePayload()),
+		uprotocol::datamodel::builder::UMessageBuilder::UnexpectedFormat);
+
+	EXPECT_EQ(transport_->send_count_, 0);
+	EXPECT_FALSE(transport_->listener_);
+}
+
+TEST_F(RpcClientTest, InvokeFutureWithPayloadTimeout) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
+
+	decltype(client.invokeMethod()) invoke_future;
+	EXPECT_NO_THROW(invoke_future = client.invokeMethod(fakePayload()));
+
+	EXPECT_TRUE(invoke_future.valid());
+	auto is_ready = invoke_future.wait_for(150ms);
+
+	EXPECT_EQ(is_ready, std::future_status::ready);
+	if (is_ready == std::future_status::ready) {
+		auto maybe_response = invoke_future.get();
+		checkErrorResponse<uprotocol::v1::UStatus>(maybe_response, uprotocol::v1::UCode::DEADLINE_EXCEEDED);
+	}
+}
+
+TEST_F(RpcClientTest, InvokeFutureWithPayloadListenFail) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
+
+	transport_->registerListener_status_.set_code(uprotocol::v1::UCode::RESOURCE_EXHAUSTED);
+
+	decltype(client.invokeMethod()) invoke_future;
+	EXPECT_NO_THROW(invoke_future = client.invokeMethod(fakePayload()));
+
+	EXPECT_EQ(transport_->send_count_, 0);
+	EXPECT_TRUE(invoke_future.valid());
+	auto is_ready = invoke_future.wait_for(0ms);
+
+	EXPECT_EQ(is_ready, std::future_status::ready);
+	if (is_ready == std::future_status::ready) {
+		auto maybe_response = invoke_future.get();
+		checkErrorResponse<uprotocol::v1::UStatus>(maybe_response, uprotocol::v1::UCode::RESOURCE_EXHAUSTED);
+	}
+}
+
+TEST_F(RpcClientTest, InvokeFutureWithPayloadSendFail) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
+
+	transport_->send_status_.set_code(uprotocol::v1::UCode::FAILED_PRECONDITION);
+
+	decltype(client.invokeMethod()) invoke_future;
+	EXPECT_NO_THROW(invoke_future = client.invokeMethod(fakePayload()));
+
+	EXPECT_TRUE(invoke_future.valid());
+	auto is_ready = invoke_future.wait_for(0ms);
+
+	EXPECT_EQ(is_ready, std::future_status::ready);
+	if (is_ready == std::future_status::ready) {
+		auto maybe_response = invoke_future.get();
+		checkErrorResponse<uprotocol::v1::UStatus>(maybe_response, uprotocol::v1::UCode::FAILED_PRECONDITION);
+	}
+}
+
+TEST_F(RpcClientTest, InvokeFutureWithPayloadClientDestroyed) {
+	std::future<uprotocol::communication::RpcClient::MessageOrStatus> invoke_future;
+
+	{
+		auto client = uprotocol::communication::RpcClient(
+			transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
+
+		EXPECT_NO_THROW(invoke_future = client.invokeMethod(fakePayload()));
+	}
+
+	EXPECT_TRUE(invoke_future.valid());
+	auto is_ready = invoke_future.wait_for(0ms);
+
+	EXPECT_EQ(is_ready, std::future_status::ready);
+	if (is_ready == std::future_status::ready) {
+		auto maybe_response = invoke_future.get();
+		checkErrorResponse<uprotocol::v1::UStatus>(maybe_response, uprotocol::v1::UCode::CANCELLED);
+	}
+}
+
+TEST_F(RpcClientTest, InvokeFutureWithPayloadCommstatus) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
+
+	decltype(client.invokeMethod()) invoke_future;
+	EXPECT_NO_THROW(invoke_future = client.invokeMethod(fakePayload()));
+
+	using UMessageBuilder = uprotocol::datamodel::builder::UMessageBuilder;
+	auto response_builder = UMessageBuilder::response(transport_->message_);
+	response_builder.withCommStatus(uprotocol::v1::UCode::PERMISSION_DENIED);
+	auto response = response_builder.build();
+	EXPECT_NO_THROW(transport_->mockMessage(response));
+
+	EXPECT_TRUE(invoke_future.valid());
+	auto is_ready = invoke_future.wait_for(0ms);
+
+	EXPECT_EQ(is_ready, std::future_status::ready);
+	if (is_ready == std::future_status::ready) {
+		auto maybe_response = invoke_future.get();
+		checkErrorResponse<uprotocol::v1::UCode>(maybe_response, uprotocol::v1::UCode::PERMISSION_DENIED);
+	}
+}
+
+#if 0
+#endif
 
 }  // namespace
