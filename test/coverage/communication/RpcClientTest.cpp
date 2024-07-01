@@ -179,10 +179,15 @@ TEST_F(RpcClientTest, InvokeFutureWithoutPayloadTimeout) {
 	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
 
 	decltype(client.invokeMethod()) invoke_future;
+	auto when_requested = std::chrono::steady_clock::now();
 	EXPECT_NO_THROW(invoke_future = client.invokeMethod());
 
 	EXPECT_TRUE(invoke_future.valid());
 	auto is_ready = invoke_future.wait_for(150ms);
+	auto when_expired = std::chrono::steady_clock::now();
+
+	EXPECT_GE((when_expired - when_requested), 10ms);
+	EXPECT_LE((when_expired - when_requested), 2*10ms);
 
 	EXPECT_EQ(is_ready, std::future_status::ready);
 	if (is_ready == std::future_status::ready) {
@@ -354,10 +359,15 @@ TEST_F(RpcClientTest, InvokeFutureWithPayloadTimeout) {
 	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
 
 	decltype(client.invokeMethod()) invoke_future;
+	auto when_requested = std::chrono::steady_clock::now();
 	EXPECT_NO_THROW(invoke_future = client.invokeMethod(fakePayload()));
 
 	EXPECT_TRUE(invoke_future.valid());
 	auto is_ready = invoke_future.wait_for(150ms);
+	auto when_expired = std::chrono::steady_clock::now();
+
+	EXPECT_GE((when_expired - when_requested), 10ms);
+	EXPECT_LE((when_expired - when_requested), 2*10ms);
 
 	EXPECT_EQ(is_ready, std::future_status::ready);
 	if (is_ready == std::future_status::ready) {
@@ -493,6 +503,7 @@ TEST_F(RpcClientTest, InvokeCallbackWithoutPayloadTimeout) {
 
 	bool callback_called = false;
 	std::condition_variable callback_event;
+	auto when_requested = std::chrono::steady_clock::now();
 
 	EXPECT_NO_THROW(
 		client.invokeMethod([this, &callback_called, &callback_event](auto maybe_response) {
@@ -504,6 +515,10 @@ TEST_F(RpcClientTest, InvokeCallbackWithoutPayloadTimeout) {
 	std::mutex mtx;
 	std::unique_lock lock(mtx);
 	callback_called = callback_event.wait_for(lock, 150ms, [&callback_called]() { return callback_called; });
+	auto when_expired = std::chrono::steady_clock::now();
+
+	EXPECT_GE((when_expired - when_requested), 10ms);
+	EXPECT_LE((when_expired - when_requested), 2*10ms);
 
 	EXPECT_TRUE(callback_called);
 }
@@ -668,6 +683,7 @@ TEST_F(RpcClientTest, InvokeCallbackWithPayloadTimeout) {
 	bool callback_called = false;
 	std::condition_variable callback_event;
 
+	auto when_requested = std::chrono::steady_clock::now();
 	EXPECT_NO_THROW(
 		client.invokeMethod(fakePayload(),
 			[this, &callback_called, &callback_event](auto maybe_response) {
@@ -679,6 +695,10 @@ TEST_F(RpcClientTest, InvokeCallbackWithPayloadTimeout) {
 	std::mutex mtx;
 	std::unique_lock lock(mtx);
 	callback_called = callback_event.wait_for(lock, 150ms, [&callback_called]() { return callback_called; });
+	auto when_expired = std::chrono::steady_clock::now();
+
+	EXPECT_GE((when_expired - when_requested), 10ms);
+	EXPECT_LE((when_expired - when_requested), 2*10ms);
 
 	EXPECT_TRUE(callback_called);
 }
