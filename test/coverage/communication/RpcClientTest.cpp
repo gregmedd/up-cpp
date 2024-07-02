@@ -16,6 +16,8 @@
 #include <up-cpp/datamodel/builder/Uuid.h>
 #include <up-cpp/datamodel/serializer/Uuid.h>
 #include <up-cpp/datamodel/validator/UMessage.h>
+#include <up-cpp/datamodel/validator/UUri.h>
+#include <list>
 
 #include "UTransportMock.h"
 
@@ -134,13 +136,69 @@ uprotocol::datamodel::builder::Payload fakePayload() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Construction
 TEST_F(RpcClientTest, CanConstructWithoutExceptions) {
+	// Base parameters
 	EXPECT_NO_THROW(auto client = uprotocol::communication::RpcClient(
 	                    transport_, methodUri(),
 	                    uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms););
+
+	// Optional format
+	EXPECT_NO_THROW(
+		auto client = uprotocol::communication::RpcClient(
+			transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4,
+			10ms, uprotocol::v1::UPayloadFormat::UPAYLOAD_FORMAT_JSON);
+		);
+
+	// Optional permission level
+	EXPECT_NO_THROW(
+		auto client = uprotocol::communication::RpcClient(
+			transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4,
+			10ms, {}, 9);
+		);
+
+	// Optional permission level
+	EXPECT_NO_THROW(
+		auto client = uprotocol::communication::RpcClient(
+			transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4,
+			10ms, {}, {}, "Some token");
+		);
+}
+
+TEST_F(RpcClientTest, ExceptionThrownWithInvalidConstructorArguments) {
+	// Bad method URI
+	EXPECT_THROW(
+		auto uri = methodUri();
+		uri.set_resource_id(0);
+		auto client = uprotocol::communication::RpcClient(
+			transport_, std::move(uri),
+			uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);,
+		uprotocol::datamodel::validator::uri::InvalidUUri);
+
+	// Bad priority
+	EXPECT_THROW(
+		auto client = uprotocol::communication::RpcClient(
+			transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS3,
+			10ms);,
+		std::out_of_range);
+
+	// Bad ttl
+	EXPECT_THROW(
+		auto client = uprotocol::communication::RpcClient(
+			transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4,
+			0ms);,
+		std::out_of_range);
+
+	// Bad payload format
+	EXPECT_THROW(
+		auto client = uprotocol::communication::RpcClient(
+			transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4,
+			10ms, static_cast<uprotocol::v1::UPayloadFormat>(-1));,
+		std::out_of_range);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// RpcClient::invokeMethod()
 TEST_F(RpcClientTest, InvokeFutureWithoutPayload) {
 	auto client = uprotocol::communication::RpcClient(
 	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
@@ -294,6 +352,7 @@ TEST_F(RpcClientTest, InvokeFutureWithoutPayloadCommstatus) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// RpcClient::invokeMethod(Payload)
 TEST_F(RpcClientTest, InvokeFutureWithPayload) {
 	auto client = uprotocol::communication::RpcClient(
 	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
@@ -488,6 +547,7 @@ TEST_F(RpcClientTest, InvokeFutureWithPayloadCommstatus) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// RpcClient::invokeMethod(Callback)
 TEST_F(RpcClientTest, InvokeCallbackWithoutPayload) {
 	auto client = uprotocol::communication::RpcClient(
 	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
@@ -639,6 +699,7 @@ TEST_F(RpcClientTest, InvokeCallbackWithoutPayloadCommstatus) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// RpcClient::invokeMethod(Payload, Callback)
 TEST_F(RpcClientTest, InvokeCallbackWithPayload) {
 	auto client = uprotocol::communication::RpcClient(
 	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 10ms);
@@ -831,6 +892,98 @@ TEST_F(RpcClientTest, InvokeCallbackWithPayloadCommstatus) {
 	EXPECT_NO_THROW(transport_->mockMessage(response));
 
 	EXPECT_TRUE(callback_called);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Usecases
+TEST_F(RpcClientTest, MultipleSimultaneousInvocations) {
+	auto client = uprotocol::communication::RpcClient(
+	    transport_, methodUri(), uprotocol::v1::UPriority::UPRIORITY_CS4, 250ms);
+
+	std::list<decltype(client.invokeMethod())> futures;
+	std::list<std::decay_t<decltype(transport_->listener_.value())>> callables;
+	std::list<uprotocol::v1::UMessage> requests;
+
+	futures.push_back(client.invokeMethod());
+	callables.push_back(transport_->listener_.value());
+	requests.push_back(transport_->message_);
+
+	futures.push_back(client.invokeMethod(fakePayload()));
+	callables.push_back(transport_->listener_.value());
+	requests.push_back(transport_->message_);
+
+	futures.push_back(client.invokeMethod());
+	callables.push_back(transport_->listener_.value());
+	requests.push_back(transport_->message_);
+
+	futures.push_back(client.invokeMethod(fakePayload()));
+	callables.push_back(transport_->listener_.value());
+	requests.push_back(transport_->message_);
+
+	std::vector<uprotocol::transport::UTransport::ListenHandle> handles;
+
+	int callback_count = 0;
+	auto callback = [&callback_count](auto){ ++callback_count; };
+
+	client.invokeMethod(callback);
+	callables.push_back(transport_->listener_.value());
+	requests.push_back(transport_->message_);
+
+	client.invokeMethod(fakePayload(), callback);
+	callables.push_back(transport_->listener_.value());
+	requests.push_back(transport_->message_);
+
+	client.invokeMethod(callback);
+	callables.push_back(transport_->listener_.value());
+	requests.push_back(transport_->message_);
+
+	client.invokeMethod(fakePayload(), callback);
+	callables.push_back(transport_->listener_.value());
+	requests.push_back(transport_->message_);
+
+	auto readyFutures = [&futures]() {
+		size_t ready = 0;
+		for (auto& future : futures) {
+			auto is_ready = future.wait_for(0ms);
+			if (is_ready == std::future_status::ready) {
+				++ready;
+			}
+		}
+		return ready;
+	};
+
+	EXPECT_EQ(callback_count, 0);
+	EXPECT_EQ(readyFutures(), 0);
+
+	using UMessageBuilder = uprotocol::datamodel::builder::UMessageBuilder;
+
+	auto deliverMessage = [&callables](uprotocol::v1::UMessage&& message) {
+		for (auto& callable : callables) {
+			callable(std::move(message));
+		}
+	};
+
+	deliverMessage(UMessageBuilder::response(requests.front()).build());
+	deliverMessage(UMessageBuilder::response(requests.back()).build());
+
+	EXPECT_EQ(callback_count, 1);
+	EXPECT_EQ(readyFutures(), 1);
+	EXPECT_EQ(futures.front().wait_for(0ms), std::future_status::ready);
+
+	requests.pop_front();
+	requests.pop_back();
+
+	deliverMessage(UMessageBuilder::response(requests.front()).build());
+	deliverMessage(UMessageBuilder::response(requests.back()).build());
+	requests.pop_front();
+	requests.pop_back();
+	deliverMessage(UMessageBuilder::response(requests.front()).build());
+	deliverMessage(UMessageBuilder::response(requests.back()).build());
+
+	EXPECT_EQ(callback_count, 3);
+	EXPECT_EQ(readyFutures(), 3);
+
+	// Intentionally leaving a couple pending requests to discard
 }
 
 }  // namespace
