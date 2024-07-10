@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "**" ]
   pull_request:
     branches: ["**"]
   
@@ -422,6 +422,7 @@ jobs:
           tidy-checks: '' # Read .clang-tidy for configuration
           database: compile_commands.json
           extra-args: "-std=c++17"
+          files-changed-only: false
 
       - name: Run linters on tests
         id: test-linter
@@ -435,6 +436,7 @@ jobs:
           tidy-checks: '' # Read .clang-tidy for configuration
           database: compile_commands.json
           extra-args: "-std=c++17"
+          files-changed-only: false
 
       - name: Report lint failure
         if: steps.source-linter.outputs.checks-failed > 0 || steps.test-linter.outputs.checks-failed > 0
