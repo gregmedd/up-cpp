@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "v1.0_up-v1.6.0" ]
+    branches: [ "main", "v*_up-v*" ]
   pull_request:
     branches: ["**"]
 
@@ -10,103 +10,42 @@ permissions:
   contents: read
   
 jobs:
-  build:
-    name: Build up-cpp and dependencies
-    runs-on: ubuntu-latest
+  build-gcc:
+    name: GCC 11.4 Release
+    uses: ./.github/workflows/build.yml
+    with:
+      build_type: 'Release'
+      compiler: 'gcc'
+      export_compile_commands: true
 
-    steps:
-      - name: Install Conan
-        id: conan
-        uses: turtlebrowser/get-conan@main
-        with:
-          version: 2.3.2
+  build-clang:
+    name: Clang 13 Release
+    uses: ./.github/workflows/build.yml
+    with:
+      build_type: 'Release'
+      compiler: 'clang'
 
-      - name: Fetch up-cpp
-        uses: actions/checkout@v4
-        with:
-          path: up-cpp
+  test-gcc:
+    name: GCC 11.4 Release
+    needs: build-gcc
+    uses: ./.github/workflows/run-tests.yml
+    with:
+      build_type: 'Release'
+      compiler: 'gcc'
 
-      - name: Install conan CI profile
-        shell: bash
-        run: |
-          conan profile detect
-          cp up-cpp/.github/workflows/ci_conan_profile "$(conan profile path default)"
-          conan profile show
-
-      - name: Fetch up-core-api conan recipe
-        uses: actions/checkout@v4
-        with:
-          path: up-conan-recipes
-          repository: eclipse-uprotocol/up-conan-recipes
-
-      - name: Build up-core-api conan package
-        shell: bash
-        run: |
-          conan create --version 1.6.0 up-conan-recipes/up-core-api/release
-
-      - name: Build up-cpp with tests
-        shell: bash
-        run: |
-          cd up-cpp
-          conan install --build=missing .
-          cmake --preset conan-release -DCMAKE_EXPORT_COMPILE_COMMANDS=yes
-          cd build/Release
-          cmake --build . -- -j
-
-      - name: Save conan cache to archive
-        shell: bash
-        run: |
-          conan cache save --file ./conan-cache.tgz '*'
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: up-cpp/build/Release
-
-      - name: Upload compile commands
-        uses: actions/upload-artifact@v4
-        with:
-          name: compile-commands
-          path: up-cpp/build/Release/compile_commands.json
-
-      - name: Upload conan cache for linting
-        uses: actions/upload-artifact@v4
-        with:
-          name: conan-cache
-          path: ./conan-cache.tgz
-
-  test:
-    name: Run up-cpp tests
-    runs-on: ubuntu-latest
-    needs: build
-
-    steps:
-      - name: Get build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifacts
-          path: up-cpp/build/Release
-
-      - name: Run all tests
-        shell: bash
-        run: |
-          cd up-cpp/build/Release
-          chmod +x bin/*
-          ctest
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: success() || failure()
-        with:
-          name: test-results
-          path: 'up-cpp/build/Release/test/results/*.xml'
+  test-clang:
+    name: Clang 13 Release
+    needs: build-clang
+    uses: ./.github/workflows/run-tests.yml
+    with:
+      build_type: 'Release'
+      compiler: 'clang'
 
 # NOTE: Run dynamic analysis in unit tests
   memcheck:
     name: Run Valgrind Memcheck
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-gcc
 
     steps:
       - name: Get build artifacts
@@ -174,7 +113,7 @@ jobs:
   threadcheck:
     name: Run Valgrind ThreadCheck
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-gcc
 
     steps:
       - name: Get build artifacts
@@ -243,7 +182,7 @@ jobs:
   helgrind:
     name: Run Valgrind Helgrind
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-gcc
 
     steps:
       - name: Get build artifacts
@@ -312,7 +251,7 @@ jobs:
   dhat:
     name: Run Valgrind DHAT
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-gcc
 
     steps:
       - name: Get build artifacts
@@ -381,7 +320,7 @@ jobs:
   lint:
     name: Lint C++ sources
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-gcc
     permissions:
       contents: write
       pull-requests: read
@@ -461,7 +400,7 @@ jobs:
   ci:
     name: CI status checks
     runs-on: ubuntu-latest
-    needs: [build, test, memcheck, threadcheck, helgrind, dhat]
+    needs: [build-gcc, build-clang, test-gcc, test-clang, memcheck, threadcheck, helgrind, dhat]
     if: always()
     steps:
       - name: Check whether all jobs pass
