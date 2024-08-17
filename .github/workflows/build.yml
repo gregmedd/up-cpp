@@ -31,8 +31,8 @@ jobs:
         if: ${{ inputs.conan_version == 'latest' }}
         uses: turtlebrowser/get-conan@main
 
-      - name: Install Conan ${{ inputs.conan_version }}
-        if: ${{ ! inputs.conan_version == 'latest' }}
+      - name: Install Conan ${{ inputs.conan_version == 'latest' && 'version' || inputs.conan_version }}
+        if: ${{ inputs.conan_version != 'latest' }}
         uses: turtlebrowser/get-conan@main
         with:
           version: ${{ inputs.conan_version }}
@@ -42,7 +42,7 @@ jobs:
         with:
           path: up-cpp
 
-      - name: Install conan CI profile
+      - name: Install GCC conan profile
         if: ${{ inputs.compiler == 'gcc' }}
         shell: bash
         run: |
@@ -50,7 +50,7 @@ jobs:
           cp up-cpp/.github/workflows/conan_profiles/gcc-11.4 "$(conan profile path default)"
           conan profile show
 
-      - name: Install conan CI profile
+      - name: Install Clang conan profile
         if: ${{ inputs.compiler == 'clang' }}
         shell: bash
         run: |
@@ -70,7 +70,7 @@ jobs:
           conan create --version 1.6.0-alpha3 up-conan-recipes/up-core-api/release
 
       - name: Build up-cpp with tests
-        if: ${{ ! inputs.build_type == 'Coverage' }}
+        if: ${{ inputs.build_type != 'Coverage' }}
         env:
           BUILD_TYPE: ${{ inputs.build_type }}
           CMAKE_PRESET: ${{ inputs.build_type == 'Debug' && 'conan-debug' || 'conan-release' }}

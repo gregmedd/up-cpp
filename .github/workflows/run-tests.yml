@@ -14,7 +14,7 @@ on:
   
 jobs:
   test:
-    name: Run up-cpp tests
+    name: run tests
     runs-on: ubuntu-22.04
 
     steps:

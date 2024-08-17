@@ -11,7 +11,7 @@ permissions:
   
 jobs:
   build-gcc:
-    name: Build up-cpp with GCC 11.4
+    name: GCC 11.4 Release
     uses: ./.github/workflows/build.yml
     with:
       build_type: 'Release'
@@ -19,14 +19,14 @@ jobs:
       export_compile_commands: true
 
   build-clang:
-    name: Build up-cpp with Clang 13
+    name: Clang 13 Release
     uses: ./.github/workflows/build.yml
     with:
       build_type: 'Release'
       compiler: 'clang'
 
   test-gcc:
-    name: Run up-cpp tests (gcc build)
+    name: GCC 11.4 Release
     needs: build-gcc
     uses: ./.github/workflows/run-tests.yml
     with:
@@ -34,7 +34,7 @@ jobs:
       compiler: 'gcc'
 
   test-clang:
-    name: Run up-cpp tests (clang build)
+    name: Clang 13 Release
     needs: build-clang
     uses: ./.github/workflows/run-tests.yml
     with:
