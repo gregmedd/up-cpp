@@ -28,12 +28,10 @@ jobs:
 
     steps:
       - name: Install Conan
-        id: conan
         if: ${{ inputs.conan_version == 'latest' }}
         uses: turtlebrowser/get-conan@main
 
       - name: Install Conan ${{ inputs.conan_version }}
-        id: conan
         if: ${{ ! inputs.conan_version == 'latest' }}
         uses: turtlebrowser/get-conan@main
         with:
