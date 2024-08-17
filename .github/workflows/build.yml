@@ -1,0 +1,112 @@
+name: Build up-cpp
+
+on:
+  workflow_call:
+    inputs:
+      conan_version:
+        description: 'Conan version number to install'
+        default: 'latest'
+        required: false
+        type: string
+      compiler:
+        description: 'One of gcc or clang'
+        default: 'gcc'
+        required: false
+        type: string
+      build_type:
+        description: 'One of Release, Debug, or Coverage'
+        default: 'Release'
+        required: false
+        type: string
+      export_compile_commands:
+        description: 'When true, compile_commands.json will be included in the artifacts'
+        default: false
+        required: false
+        type: boolean
+
+jobs:
+  build:
+    name: Build up-cpp and dependencies
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Install Conan
+        id: conan
+        if: ${{ inputs.conan_version == 'latest' }}
+        uses: turtlebrowser/get-conan@main
+
+      - name: Install Conan ${{ inputs.conan_version }}
+        id: conan
+        if: ${{ inputs.conan_version == 'latest' }}
+        uses: turtlebrowser/get-conan@main
+        with:
+          version: ${{ conan_version }}
+
+      - name: Fetch up-cpp
+        uses: actions/checkout@v4
+        with:
+          path: up-cpp
+
+      - name: Install conan CI profile
+        if: ${{ inputs.compiler == 'gcc' }}
+        shell: bash
+        run: |
+          conan profile detect
+          cp up-cpp/.github/workflows/conan_profiles/gcc-11.4 "$(conan profile path default)"
+          conan profile show
+
+      - name: Install conan CI profile
+        if: ${{ inputs.compiler == 'clang' }}
+        shell: bash
+        run: |
+          conan profile detect
+          cp up-cpp/.github/workflows/conan_profiles/clang-13 "$(conan profile path default)"
+          conan profile show
+
+      - name: Fetch up-core-api conan recipe
+        uses: actions/checkout@v4
+        with:
+          path: up-conan-recipes
+          repository: eclipse-uprotocol/up-conan-recipes
+
+      - name: Build up-core-api conan package
+        shell: bash
+        run: |
+          conan create --version 1.6.0-alpha3 up-conan-recipes/up-core-api/release
+
+      - name: Build up-cpp with tests
+        if: ${{ ! inputs.build_type == 'Coverage' }}
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+          CMAKE_PRESET: ${{ inputs.build_type == 'Debug' && 'conan-debug' || 'conan-release' }}
+          COMPILE_COMMANDS: ${{ inputs.export_compile_commands && '-DCMAKE_EXPORT_COMPILE_COMMANDS=yes' || '' }}
+        shell: bash
+        run: |
+          cd up-cpp
+          conan install --build=missing . -s build_type=$BUILD_TYPE --deployer=full_deploy
+          cmake --preset $CMAKE_PRESET $COMPILE_COMMANDS
+          cmake --build --preset $CMAKE_PRESET -- -j
+
+      - name: Create artifact archives
+        shell: bash
+        run: |
+          tar -cvaf build_output.tar.xz up-cpp/build/${{ inputs.build_type }} up-cpp/CMakeUserPresets.json
+          tar -cvaf conan_deploy.tar.xz up-cpp/full_deploy
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ inputs.build_type }}-${{ inputs.compiler }}
+          path: build_output.tar.xz
+
+      - name: Upload compile commands
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-commands-${{ inputs.build_type }}-${{ inputs.compiler }}
+          path: up-cpp/build/${{ inputs.build_type }}/compile_commands.json
+
+      - name: Upload conan cache for linting
+        uses: actions/upload-artifact@v4
+        with:
+          name: conan-deployed-artifacts-${{ inputs.build_type }}-${{ inputs.compiler }}
+          path: conan_deploy.tar.xz

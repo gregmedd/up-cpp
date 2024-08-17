@@ -1,0 +1,44 @@
+name: Run Tests
+
+on:
+  workflow_call:
+    inputs:
+      compiler:
+        description: 'One of gcc or clang'
+        required: true
+        type: string
+      build_type:
+        description: 'One of Release, Debug, or Coverage'
+        required: true
+        type: string
+  
+jobs:
+  test:
+    name: Run up-cpp tests
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Get build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-${{ inputs.build_type }}-${{ inputs.compiler }}
+
+      - name: Extract artifacts
+        shell: bash
+        run: |
+          tar -xvf build_output.tar.xz
+
+      - name: Run all tests
+        env:
+          CMAKE_PRESET: ${{ inputs.build_type == 'Debug' && 'conan-debug' || 'conan-release' }}
+        shell: bash
+        run: |
+          cd up-cpp
+          ctest --preset $CMAKE_PRESET -j
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: test-results-${{ inputs.build_type }}-${{ inputs.compiler }}
+          path: 'up-cpp/build/${{ inputs.build_type }}/test/results/*.xml'
