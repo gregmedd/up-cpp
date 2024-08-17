@@ -1,5 +1,3 @@
-name: Build up-cpp
-
 on:
   workflow_call:
     inputs:
@@ -26,7 +24,6 @@ on:
 
 jobs:
   build:
-    name: Build up-cpp and dependencies
     runs-on: ubuntu-22.04
 
     steps:
@@ -37,10 +34,10 @@ jobs:
 
       - name: Install Conan ${{ inputs.conan_version }}
         id: conan
-        if: ${{ inputs.conan_version == 'latest' }}
+        if: ${{ ! inputs.conan_version == 'latest' }}
         uses: turtlebrowser/get-conan@main
         with:
-          version: ${{ conan_version }}
+          version: ${{ inputs.conan_version }}
 
       - name: Fetch up-cpp
         uses: actions/checkout@v4
